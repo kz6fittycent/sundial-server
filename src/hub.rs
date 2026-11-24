@@ -233,7 +233,8 @@ impl Hub {
         self.save_logged(&i);
     }
 
-    pub fn enqueue(&self, id: &str, req: AdminRequest, now: i64) -> Result<String, String> {
+    /// True if the computer is online.
+    pub fn enqueue(&self, id: &str, req: AdminRequest, now: i64) -> Result<bool, String> {
         let mut i = self.inner.lock().unwrap();
         Self::expire(&mut i, now);
         let h = i.hosts.get_mut(id).ok_or("no such computer")?;
@@ -256,7 +257,7 @@ impl Hub {
         if let Some(w) = i.wake.get(id) {
             w.notify_waiters();
         }
-        Ok(cid)
+        Ok(i.online.contains_key(id))
     }
 
     pub fn revoke(&self, id: &str) -> bool {

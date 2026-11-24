@@ -1,8 +1,9 @@
 //! Sundial Server: lets parents manage Sundial computers from anywhere. The computers
-//! connect to it; it never connects to them. (The web page is not here yet.)
+//! connect to it; it never connects to them.
 
 mod hub;
 mod net;
+mod web;
 
 use anyhow::{Context, Result, bail};
 use axum::Router;
@@ -46,6 +47,15 @@ enum Cmd {
     Run {
         #[arg(long, default_value = "0.0.0.0:8461")]
         listen: SocketAddr,
+    },
+    /// Set (or delete) a parent login.
+    Passwd {
+        name: String,
+        #[arg(long)]
+        delete: bool,
+        /// Read the password from standard input.
+        #[arg(long, conflicts_with = "delete")]
+        stdin: bool,
     },
     /// Show a one-time code for adding a computer.
     Pair,
@@ -94,6 +104,11 @@ async fn real_main() -> Result<()> {
     let sock = cli.dir.join("control.sock");
     let req = match cli.cmd {
         Cmd::Run { listen } => return run(cli.dir, listen).await,
+        Cmd::Passwd {
+            name,
+            delete,
+            stdin,
+        } => return passwd(&cli.dir.join("admins"), &name, delete, stdin),
         Cmd::Pair => Control::Pair,
         Cmd::Hosts => Control::Hosts,
         Cmd::Revoke { id } => Control::Revoke { id },
@@ -129,6 +144,35 @@ async fn real_main() -> Result<()> {
     Ok(())
 }
 
+fn passwd(path: &Path, name: &str, delete: bool, stdin: bool) -> Result<()> {
+    use sundial_web::auth;
+    if name.is_empty() || name.contains(':') || name.contains(char::is_whitespace) {
+        bail!("name can't be empty or contain ':' or spaces");
+    }
+    let mut admins = auth::read_admins(path);
+    if delete {
+        if admins.remove(name).is_none() {
+            bail!("no login named {name}");
+        }
+        return auth::write_admins(path, &admins).context("writing logins (run as root)");
+    }
+    let pw = if stdin {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        line.trim_end_matches(['\r', '\n']).to_string()
+    } else {
+        rpassword::prompt_password(format!("New password for {name}: "))?
+    };
+    if pw.chars().count() < 8 {
+        bail!("use at least 8 characters");
+    }
+    if !stdin && rpassword::prompt_password("Again: ")? != pw {
+        bail!("passwords don't match");
+    }
+    admins.insert(name.to_string(), auth::hash_password(&pw)?);
+    auth::write_admins(path, &admins).context("writing logins (run as root)")
+}
+
 async fn ask(sock: &Path, req: &Control) -> Result<Reply> {
     let mut s = UnixStream::connect(sock)
         .await
@@ -157,14 +201,16 @@ async fn run(dir: PathBuf, listen: SocketAddr) -> Result<()> {
     let _ = std::fs::remove_file(&sock);
     let listener = UnixListener::bind(&sock)?;
     std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600))?;
-    tokio::spawn(control(listener, hub.clone(), der));
+    tokio::spawn(control(listener, hub.clone(), der.clone()));
+    let auth = Arc::new(sundial_web::auth::Auth::new(dir.join("admins")));
     let app = Router::new()
         .route("/link", get(net::link))
-        .with_state(hub.clone());
+        .with_state(hub.clone())
+        .merge(web::router(hub.clone(), auth, der));
     println!("sundial-server: listening on {listen}");
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     tokio::select! {
-        r = axum_server::bind_rustls(listen, tls).serve(app.into_make_service()) => r.context("listening")?,
+        r = axum_server::bind_rustls(listen, tls).serve(app.into_make_service_with_connect_info::<SocketAddr>()) => r.context("listening")?,
         _ = term.recv() => {}
         _ = tokio::signal::ctrl_c() => {}
     }
