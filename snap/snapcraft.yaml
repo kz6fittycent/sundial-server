@@ -7,7 +7,7 @@ description: |
   time left and activity, give or take time, lock, and change hours from a web page,
   wherever the child is.
 
-  After installing, add a parent login with `sudo sundial-server passwd NAME` and
+  After installing, set up the parents in a browser on your home network:
   open https://<this computer>:8461/.
 adopt-info: sundial-server
 license: GPL-3.0-or-later
