@@ -30,6 +30,8 @@ pub struct Host {
     pub version: String,
     /// SHA-256 of the host's random token.
     token_hash: String,
+    /// Which computer this is, from hosts that say so.
+    machine: Option<String>,
     pub last_seen: i64,
     pub status: Option<AdminResponse>,
     pub queue: Vec<Command>,
@@ -146,8 +148,15 @@ impl Hub {
         }
     }
 
-    /// Use up the code. Returns the new host's id and token.
-    pub fn pair(&self, secret: &str, name: &str, now: i64) -> Result<(String, String), String> {
+    /// Use up the code. Returns the host's id and new token. A computer that was
+    /// already paired keeps its entry; its old token stops working.
+    pub fn pair(
+        &self,
+        secret: &str,
+        name: &str,
+        machine: Option<&str>,
+        now: i64,
+    ) -> Result<(String, String), String> {
         let mut i = self.inner.lock().unwrap();
         let bad = || "wrong or expired code".to_string();
         let p = i.pending.as_mut().ok_or_else(bad)?;
@@ -159,19 +168,30 @@ impl Hub {
             p.tries += 1;
             return Err(bad());
         }
-        let (id, token) = (random_hex(8), random_hex(32));
-        i.hosts.insert(
-            id.clone(),
-            Host {
-                name: name.chars().filter(|c| !c.is_control()).take(64).collect(),
-                token_hash: sha256_hex(token.as_bytes()),
-                ..Default::default()
-            },
-        );
+        let machine = machine.and_then(valid_machine);
+        let same = machine.as_ref().and_then(|m| {
+            let mut all = i.hosts.iter();
+            all.find(|(_, h)| h.machine.as_ref() == Some(m))
+                .map(|(id, _)| id.clone())
+        });
+        let (id, token) = (same.unwrap_or_else(|| random_hex(8)), random_hex(32));
+        let before = i.hosts.get(&id).cloned();
+        let h = i.hosts.entry(id.clone()).or_default();
+        h.name = name.chars().filter(|c| !c.is_control()).take(64).collect();
+        h.token_hash = sha256_hex(token.as_bytes());
+        h.machine = machine;
         if let Err(e) = self.save(&i) {
-            i.hosts.remove(&id);
+            match before {
+                Some(b) => i.hosts.insert(id, b),
+                None => i.hosts.remove(&id),
+            };
             eprintln!("sundial-server: saving: {e:#}");
             return Err("the server couldn't save the pairing".into());
+        }
+        // A connection with the old token ends.
+        i.online.remove(&id);
+        if let Some(w) = i.wake.get(&id) {
+            w.notify_waiters();
         }
         i.pending = None;
         i.paired = i.hosts.get(&id).map(|h| h.name.clone());
@@ -186,9 +206,19 @@ impl Hub {
     }
 
     /// A host connected. Returns the connection number and its wake-up.
-    pub fn connected(&self, id: &str, version: &str, now: i64) -> Option<(u64, Arc<Notify>)> {
+    pub fn connected(
+        &self,
+        id: &str,
+        version: &str,
+        machine: Option<&str>,
+        now: i64,
+    ) -> Option<(u64, Arc<Notify>)> {
         let mut i = self.inner.lock().unwrap();
         let h = i.hosts.get_mut(id)?;
+        // Paired before hosts said which computer they are.
+        if h.machine.is_none() {
+            h.machine = machine.and_then(valid_machine);
+        }
         h.version = version.chars().take(32).collect();
         h.last_seen = now;
         i.conns += 1;
@@ -313,6 +343,10 @@ impl Hub {
     }
 }
 
+fn valid_machine(m: &str) -> Option<String> {
+    (m.len() == 32 && m.bytes().all(|c| c.is_ascii_hexdigit())).then(|| m.to_string())
+}
+
 fn push_result(h: &mut Host, ts: i64, id: String, ok: bool, message: String) {
     h.results.push(CommandResult {
         ts,
@@ -347,11 +381,11 @@ mod tests {
     fn code_works_once_and_expires() {
         let h = hub("code");
         let c = h.new_code(None, 0);
-        let (id, tok) = h.pair(&c.secret, "pc", 1).unwrap();
+        let (id, tok) = h.pair(&c.secret, "pc", None, 1).unwrap();
         assert!(h.check(&id, &tok) && !h.check(&id, "nope"));
-        assert!(h.pair(&c.secret, "pc", 2).is_err());
+        assert!(h.pair(&c.secret, "pc", None, 2).is_err());
         let c = h.new_code(None, 0);
-        assert!(h.pair(&c.secret, "pc", PAIR_SECS).is_err());
+        assert!(h.pair(&c.secret, "pc", None, PAIR_SECS).is_err());
     }
 
     #[test]
@@ -359,16 +393,16 @@ mod tests {
         let h = hub("guess");
         let c = h.new_code(None, 0);
         for _ in 0..PAIR_TRIES {
-            assert!(h.pair("WRONG", "pc", 1).is_err());
+            assert!(h.pair("WRONG", "pc", None, 1).is_err());
         }
-        assert!(h.pair(&c.secret, "pc", 1).is_err());
+        assert!(h.pair(&c.secret, "pc", None, 1).is_err());
     }
 
     #[test]
     fn queue_survives_restart_and_expires() {
         let h = hub("queue");
         let c = h.new_code(None, 0);
-        let (id, _) = h.pair(&c.secret, "pc", 0).unwrap();
+        let (id, _) = h.pair(&c.secret, "pc", None, 0).unwrap();
         h.enqueue(&id, grant(), 0).unwrap();
         let again = Hub::load(h.path.clone()).unwrap();
         assert_eq!(again.queued(&id, 10).len(), 1);
@@ -380,10 +414,31 @@ mod tests {
     fn revoked_host_is_out() {
         let h = hub("revoke");
         let c = h.new_code(None, 0);
-        let (id, tok) = h.pair(&c.secret, "pc", 0).unwrap();
-        let (n, _) = h.connected(&id, "1", 0).unwrap();
+        let (id, tok) = h.pair(&c.secret, "pc", None, 0).unwrap();
+        let (n, _) = h.connected(&id, "1", None, 0).unwrap();
         assert!(h.current(&id, n));
         assert!(h.revoke(&id));
         assert!(!h.current(&id, n) && !h.check(&id, &tok));
+    }
+
+    #[test]
+    fn pairing_again_replaces_the_entry() {
+        let h = hub("again");
+        let (m, other) = ("a".repeat(32), "b".repeat(32));
+        let pair = |m: Option<&str>| {
+            let c = h.new_code(None, 0);
+            h.pair(&c.secret, "pc", m, 0).unwrap()
+        };
+        let (id, old) = pair(None);
+        let (n, _) = h.connected(&id, "1", Some(&m), 0).unwrap();
+        h.enqueue(&id, grant(), 0).unwrap();
+        let (same, new) = pair(Some(&m));
+        assert_eq!(id, same);
+        assert!(!h.current(&id, n) && !h.check(&id, &old) && h.check(&id, &new));
+        assert_eq!(h.queued(&id, 1).len(), 1, "waiting changes are kept");
+        // The same name is not enough, and neither is a made-up machine.
+        assert_ne!(pair(Some(&other)).0, id);
+        assert_ne!(pair(None).0, id);
+        assert_ne!(pair(Some("junk")).0, pair(Some("junk")).0);
     }
 }

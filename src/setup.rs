@@ -63,7 +63,7 @@ pub async fn first_run(State(s): State<Setup>, req: Request, next: Next) -> Resp
     next.run(req).await
 }
 
-fn page(title: &str, body: &str) -> Response {
+pub fn page(title: &str, body: &str) -> Response {
     let html = format!(
         "<header><h1>☀ <span>Sundial</span> <small class=muted>{}</small></h1></header>{body}{}",
         esc(title),

@@ -51,6 +51,7 @@ async fn serve(hub: Arc<Hub>, mut ws: WebSocket) {
         name,
         version,
         auth,
+        machine,
     }) = serde_json::from_str(&t)
     else {
         return;
@@ -63,7 +64,7 @@ async fn serve(hub: Arc<Hub>, mut ws: WebSocket) {
         .await;
     }
     match auth {
-        Auth::Pair { secret } => match hub.pair(&secret, &name, now()) {
+        Auth::Pair { secret } => match hub.pair(&secret, &name, machine.as_deref(), now()) {
             Ok((host_id, token)) => {
                 println!("sundial-server: paired {name:?}");
                 let token = Some(token);
@@ -76,7 +77,8 @@ async fn serve(hub: Arc<Hub>, mut ws: WebSocket) {
             if !hub.check(&host_id, &token) {
                 return refuse(ws, "this computer is no longer paired").await;
             }
-            let Some((conn, wake)) = hub.connected(&host_id, &version, now()) else {
+            let Some((conn, wake)) = hub.connected(&host_id, &version, machine.as_deref(), now())
+            else {
                 return;
             };
             let welcome = ServerMsg::Welcome {

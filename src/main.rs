@@ -14,6 +14,7 @@ use chrono::Utc;
 use clap::{Parser, Subcommand};
 use hub::{HostSummary, Hub};
 use serde::{Deserialize, Serialize};
+use std::io::Write as _;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -136,23 +137,33 @@ async fn real_main() -> Result<()> {
     if !r.ok {
         bail!("{}", r.text);
     }
-    if !r.text.is_empty() {
-        println!("{}", r.text);
+    match std::io::stdout().write_all(report(&r).as_bytes()) {
+        // Such as `| head`.
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        r => r.context("printing"),
     }
-    for h in r.hosts {
+}
+
+fn report(r: &Reply) -> String {
+    let mut out = String::new();
+    if !r.text.is_empty() {
+        out += &format!("{}\n", r.text);
+    }
+    for h in &r.hosts {
         let state = if h.online { "online" } else { "offline" };
-        println!("{} {} ({state}, {} waiting)", h.id, h.name, h.waiting);
+        out += &format!("{} {} ({state}, {} waiting)\n", h.id, h.name, h.waiting);
         for u in h.status.iter().flat_map(|s| &s.users) {
-            println!("  {}: {}", u.name, u.summary);
+            out += &format!("  {}: {}\n", u.name, u.summary);
             for a in &u.activity_today {
-                println!("    {} {} s", a.name, a.secs);
+                out += &format!("    {} {} s\n", a.name, a.secs);
             }
         }
         for c in h.results.iter().rev().take(5) {
-            println!("  {} {}", if c.ok { "done:" } else { "failed:" }, c.message);
+            let what = if c.ok { "done:" } else { "failed:" };
+            out += &format!("  {what} {}\n", c.message);
         }
     }
-    Ok(())
+    out
 }
 
 fn passwd(path: &Path, name: &str, delete: bool, stdin: bool) -> Result<()> {
@@ -218,7 +229,9 @@ async fn run(dir: PathBuf, listen: Option<SocketAddr>) -> Result<()> {
     let listener = UnixListener::bind(&sock)?;
     std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600))?;
     tokio::spawn(control(listener, hub.clone(), der.clone()));
-    let auth = Arc::new(sundial_web::auth::Auth::new(dir.join("admins")));
+    let auth = Arc::new(
+        sundial_web::auth::Auth::new(dir.join("admins")).keep_sessions(dir.join("sessions.json")),
+    );
     let app = Router::new()
         .route("/link", get(net::link))
         .with_state(hub.clone())

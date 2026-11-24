@@ -1,13 +1,13 @@
 //! The parent page: every paired computer, plus adding and removing computers.
 
-use crate::hub::Hub;
+use crate::hub::{HostSummary, Hub};
 use crate::setup::{self, Setup};
 use axum::Router;
 use axum::extract::{Form, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::post;
-use chrono::{Local, Utc};
+use chrono::{DateTime, Local, Utc};
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,6 +17,14 @@ use sundial_web::auth::Auth;
 use sundial_web::{App, Backend, Section, enc, esc, same_origin, signed_in};
 
 struct Computers(Arc<Hub>);
+
+fn state(c: &HostSummary, now: &DateTime<Local>) -> String {
+    match (c.online, c.last_seen) {
+        (true, _) => "online".into(),
+        (false, 0) => "never connected".into(),
+        (false, t) => format!("offline since {}", fmt_when(t, now)),
+    }
+}
 
 impl Backend for Computers {
     fn subtitle(&self) -> String {
@@ -78,12 +86,15 @@ impl Backend for Computers {
             "<section class=card><h2>Computers</h2><form method=post action=/pair class=row>\
              <button class=primary>Add a computer</button></form>",
         );
-        for c in self.0.list(Utc::now().timestamp()) {
+        let now = Local::now();
+        for c in self.0.list(now.timestamp()) {
             h.push_str(&format!(
-                "<details><summary>Remove {}</summary><form method=post action=/remove class=row>\
-                 <input type=hidden name=id value=\"{}\"><button class=danger>Remove</button></form></details>",
+                "<form method=post action=/remove class=row><input type=hidden name=id value=\"{}\">\
+                 <b>{}</b><span class='pill {}'>{}</span><button>Remove...</button></form>",
+                esc(&c.id),
                 esc(&c.name),
-                esc(&c.id)
+                if c.online { "ok" } else { "wait" },
+                state(&c, &now)
             ));
         }
         h.push_str("</section><section class=card><h2>Parents</h2><p><a href=/parents>Logins and passwords</a></p></section>");
@@ -136,6 +147,7 @@ fn guard(x: &Extra, headers: &HeaderMap, uri: &Uri) -> Result<(), Response> {
 #[derive(Deserialize)]
 struct RemoveForm {
     id: String,
+    confirm: Option<String>,
 }
 
 async fn remove(
@@ -146,6 +158,31 @@ async fn remove(
 ) -> Response {
     if let Err(r) = guard(&x, &headers, &uri) {
         return r;
+    }
+    let now = Local::now();
+    let known = x
+        .hub
+        .list(now.timestamp())
+        .into_iter()
+        .find(|c| c.id == f.id);
+    if let Some(c) = known.filter(|_| f.confirm.is_none()) {
+        let warn = if c.online {
+            "It's connected now. Until you pair it again, you won't see it here or be able to change anything on it."
+        } else {
+            "It isn't connected now. If it's still in use, it needs pairing again."
+        };
+        return setup::page(
+            "Computers",
+            &format!(
+                "<section class=card><h2>Remove {}? <span class='pill {}'>{}</span></h2><p>{warn} Its limits stay in force.</p>\
+                 <form method=post action=/remove class=row><input type=hidden name=id value=\"{}\"><input type=hidden name=confirm value=1>\
+                 <button class=danger>Remove</button><a class=plain href=/>Keep it</a></form></section>",
+                esc(&c.name),
+                if c.online { "ok" } else { "wait" },
+                state(&c, &now),
+                esc(&c.id)
+            ),
+        );
     }
     let q = if x.hub.revoke(&f.id) {
         format!("msg={}", enc("Computer removed."))
