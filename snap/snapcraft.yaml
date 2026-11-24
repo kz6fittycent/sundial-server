@@ -17,7 +17,7 @@ issues: https://github.com/kz6fittycent/sundial-server/issues
 contact: https://github.com/kz6fittycent/sundial-server/issues
 icon: snap/gui/sundial-server.svg
 base: core24
-grade: devel
+grade: stable
 confinement: strict
 platforms:
   amd64:

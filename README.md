@@ -36,7 +36,7 @@ Then open `https://<server>:8461/` from your home network. The first visit sets 
 
 ## Versions
 
-Versions are `x.y.z`. The patch number goes up to 9, then the minor number goes up (0.1.9 → 0.2.0).
+Versions are `x.y.z`. Releases count in threes: 0.1.0, 0.1.1, 0.1.2, then 0.2.0.
 
 More in the [wiki](https://github.com/kz6fittycent/sundial-server/wiki).
 

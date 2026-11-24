@@ -1,0 +1,36 @@
+# cargo-deny policy: known vulnerabilities, licenses and where code comes from.
+[graph]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+
+[advisories]
+version = 2
+yanked = "deny"
+# An "unmaintained" notice, not a vulnerability. Sundial's shared crates use it too.
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; move both repos off it together" },
+]
+
+[licenses]
+version = 2
+allow = [
+    "GPL-3.0-or-later",
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+# Sundial's crates are pinned by commit, which counts as a wildcard.
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/kz6fittycent/sundial"]
