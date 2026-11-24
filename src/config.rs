@@ -45,6 +45,31 @@ fn visitor(peer: IpAddr, proxy: Option<IpAddr>, forwarded: Option<&str>) -> IpAd
         .unwrap_or(peer)
 }
 
+/// The visitor is certainly on this network. Set on every request.
+#[derive(Clone, Copy)]
+pub struct AtHome(pub bool);
+
+/// Addresses that can only be on this network.
+fn local(ip: IpAddr) -> bool {
+    match ip.to_canonical() {
+        IpAddr::V4(a) => a.is_private() || a.is_loopback() || a.is_link_local(),
+        IpAddr::V6(a) => a.is_loopback() || a.is_unique_local() || a.is_unicast_link_local(),
+    }
+}
+
+/// Behind a proxy we don't know, or one that doesn't say who is visiting, nobody is.
+fn at_home(peer: IpAddr, proxy: Option<IpAddr>, forwarded: Option<&str>) -> bool {
+    match (proxy == Some(peer.to_canonical()), forwarded) {
+        (true, Some(f)) => f
+            .rsplit(',')
+            .next()
+            .and_then(|a| a.trim().parse().ok())
+            .is_some_and(local),
+        (true, None) | (false, Some(_)) => false,
+        (false, None) => local(peer),
+    }
+}
+
 /// Make the sign-in lockout count visitors, not the proxy.
 pub async fn real_ip(
     State(proxy): State<Option<IpAddr>>,
@@ -57,8 +82,10 @@ pub async fn real_ip(
         .get_all("x-forwarded-for")
         .iter()
         .next_back()
-        .and_then(|v| v.to_str().ok());
+        .map(|v| v.to_str().unwrap_or(""));
+    let home = at_home(peer.ip(), proxy, forwarded) && !req.headers().contains_key("forwarded");
     let ip = visitor(peer.ip(), proxy, forwarded);
+    req.extensions_mut().insert(AtHome(home));
     req.extensions_mut()
         .insert(ConnectInfo(SocketAddr::new(ip, peer.port())));
     next.run(req).await
@@ -77,6 +104,30 @@ mod tests {
         assert_eq!(visitor(p, Some(p), Some("6.6.6.6, 1.1.1.1")), ip("1.1.1.1"));
         assert_eq!(visitor(p, Some(p), Some("junk")), p);
         assert_eq!(visitor(p, Some(p), None), p);
+    }
+
+    #[test]
+    fn home_addresses() {
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        for a in [
+            "192.168.1.2",
+            "10.0.0.1",
+            "127.0.0.1",
+            "::1",
+            "fd00::2",
+            "::ffff:10.1.1.1",
+        ] {
+            assert!(at_home(ip(a), None, None), "{a}");
+        }
+        for a in ["8.8.8.8", "100.64.0.1", "2606:4700::1", "::ffff:8.8.8.8"] {
+            assert!(!at_home(ip(a), None, None), "{a}");
+        }
+        let p = ip("10.0.0.9");
+        assert!(at_home(p, Some(p), Some("8.8.8.8, 10.0.0.5")));
+        assert!(!at_home(p, Some(p), Some("10.0.0.5, 8.8.8.8")));
+        assert!(!at_home(p, Some(p), None));
+        assert!(!at_home(p, Some(p), Some("junk")));
+        assert!(!at_home(p, None, Some("10.0.0.5")), "unknown proxy");
     }
 
     #[test]

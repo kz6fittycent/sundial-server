@@ -1,20 +1,20 @@
 //! The parent page: every paired computer, plus adding and removing computers.
 
 use crate::hub::Hub;
+use crate::setup::{self, Setup};
 use axum::Router;
 use axum::extract::{Form, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::post;
 use chrono::{Local, Utc};
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 use sundial_core::proto::{AdminRequest, AdminResponse};
 use sundial_core::rules::fmt_when;
 use sundial_web::auth::Auth;
-use sundial_web::{
-    App, Backend, Section, enc, esc, same_origin, security_headers, shell, signed_in,
-};
+use sundial_web::{App, Backend, Section, enc, esc, same_origin, signed_in};
 
 struct Computers(Arc<Hub>);
 
@@ -86,7 +86,7 @@ impl Backend for Computers {
                 esc(&c.id)
             ));
         }
-        h.push_str("</section>");
+        h.push_str("</section><section class=card><h2>Parents</h2><p><a href=/parents>Logins and passwords</a></p></section>");
         h
     }
 }
@@ -95,23 +95,30 @@ impl Backend for Computers {
 struct Extra {
     app: App,
     hub: Arc<Hub>,
-    der: Arc<Option<Vec<u8>>>,
 }
 
-pub fn router(hub: Arc<Hub>, auth: Arc<Auth>, der: Option<Vec<u8>>) -> Router {
+pub fn router(hub: Arc<Hub>, auth: Arc<Auth>, admins: PathBuf, der: Option<Vec<u8>>) -> Router {
     let app = App {
         backend: Arc::new(Computers(hub.clone())),
         auth,
     };
     let extra = Router::new()
-        .route("/pair", post(pair))
         .route("/remove", post(remove))
         .with_state(Extra {
             app: app.clone(),
-            hub,
-            der: Arc::new(der),
+            hub: hub.clone(),
         });
-    sundial_web::router(app).merge(extra)
+    let s = Setup {
+        app: app.clone(),
+        hub,
+        der: Arc::new(der),
+        admins: Arc::new(admins),
+        lock: Arc::default(),
+    };
+    sundial_web::router(app)
+        .merge(extra)
+        .merge(setup::router(s.clone()))
+        .layer(axum::middleware::from_fn_with_state(s, setup::first_run))
 }
 
 #[allow(clippy::result_large_err)]
@@ -123,21 +130,6 @@ fn guard(x: &Extra, headers: &HeaderMap, uri: &Uri) -> Result<(), Response> {
         Some(_) => Ok(()),
         None => Err(Redirect::to("/").into_response()),
     }
-}
-
-async fn pair(State(x): State<Extra>, uri: Uri, headers: HeaderMap) -> Response {
-    if let Err(r) = guard(&x, &headers, &uri) {
-        return r;
-    }
-    let code = x.hub.new_code(x.der.as_deref(), Utc::now().timestamp());
-    let body = format!(
-        "<div class=card><h1>☀ <span>Add a computer</span></h1>\
-         <p>On the child's computer, run this with your server's address:</p>\
-         <p><code>sudo sundial pair ADDRESS {code}</code></p>\
-         <p class=code>{code}</p>\
-         <p class=muted>The code works once, for 15 minutes.</p><p><a href=/>Back</a></p></div>"
-    );
-    security_headers(Html(shell("Sundial", &body, false)).into_response())
 }
 
 #[derive(Deserialize)]

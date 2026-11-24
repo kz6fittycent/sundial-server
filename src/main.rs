@@ -4,6 +4,7 @@
 mod config;
 mod hub;
 mod net;
+mod setup;
 mod web;
 
 use anyhow::{Context, Result, bail};
@@ -212,7 +213,7 @@ async fn run(dir: PathBuf, listen: Option<SocketAddr>) -> Result<()> {
     let app = Router::new()
         .route("/link", get(net::link))
         .with_state(hub.clone())
-        .merge(web::router(hub.clone(), auth, der))
+        .merge(web::router(hub.clone(), auth, dir.join("admins"), der))
         .layer(axum::middleware::from_fn_with_state(
             cfg.trusted_proxy,
             config::real_ip,

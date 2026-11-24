@@ -7,7 +7,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use sundial_core::proto::{AdminRequest, AdminResponse};
-use sundial_link::{Command, PairCode, expiry, random_hex, sha256_hex};
+use sundial_link::{Command, PairCode, expiry, random_hex, sha256_hex, short_fingerprint};
 use tokio::sync::Notify;
 
 const PAIR_SECS: i64 = 15 * 60;
@@ -46,6 +46,8 @@ struct Pending {
 struct Inner {
     hosts: BTreeMap<String, Host>,
     pending: Option<Pending>,
+    /// Name of the computer that used the last code.
+    paired: Option<String>,
     /// Wakes a host's connection: new command, or revoked.
     wake: HashMap<String, Arc<Notify>>,
     /// Newest connection of each host; an older one steps aside.
@@ -56,6 +58,13 @@ struct Inner {
 pub struct Hub {
     path: PathBuf,
     inner: Mutex<Inner>,
+}
+
+/// What became of the last code.
+pub enum PairState {
+    Waiting(PairCode),
+    Done(String),
+    None,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -115,12 +124,26 @@ impl Hub {
     /// A new one-time code; replaces any earlier one.
     pub fn new_code(&self, self_signed_der: Option<&[u8]>, now: i64) -> PairCode {
         let code = PairCode::new(self_signed_der);
-        self.inner.lock().unwrap().pending = Some(Pending {
+        let mut i = self.inner.lock().unwrap();
+        i.paired = None;
+        i.pending = Some(Pending {
             secret: code.secret.clone(),
             until: now + PAIR_SECS,
             tries: 0,
         });
         code
+    }
+
+    pub fn pair_state(&self, self_signed_der: Option<&[u8]>, now: i64) -> PairState {
+        let i = self.inner.lock().unwrap();
+        match &i.pending {
+            Some(p) if now < p.until && p.tries < PAIR_TRIES => PairState::Waiting(PairCode {
+                pin: self_signed_der.map(short_fingerprint),
+                secret: p.secret.clone(),
+            }),
+            Some(_) => PairState::None,
+            None => i.paired.clone().map_or(PairState::None, PairState::Done),
+        }
     }
 
     /// Use up the code. Returns the new host's id and token.
@@ -151,6 +174,7 @@ impl Hub {
             return Err("the server couldn't save the pairing".into());
         }
         i.pending = None;
+        i.paired = i.hosts.get(&id).map(|h| h.name.clone());
         Ok((id, token))
     }
 
