@@ -38,7 +38,7 @@ struct Cli {
 
 fn default_dir() -> PathBuf {
     std::env::var_os("SNAP_COMMON")
-        .map(PathBuf::from)
+        .map(|d| PathBuf::from(d).join("data")) // the top folder is not ours to chmod
         .unwrap_or_else(|| "/var/lib/sundial-server".into())
 }
 
