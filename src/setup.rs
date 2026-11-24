@@ -64,9 +64,24 @@ pub async fn first_run(State(s): State<Setup>, req: Request, next: Next) -> Resp
 }
 
 pub fn page(title: &str, body: &str) -> Response {
+    let tab = match title {
+        "Computers" => "computers",
+        "Parents" | "Two-factor sign-in" => "parents",
+        _ => "",
+    };
+    // Setup has steps instead of tabs.
+    let (out, main) = if tab.is_empty() {
+        ("", body.to_string())
+    } else {
+        (
+            "<form method=post action=/logout><button>Sign out</button></form>",
+            sundial_web::panel(&crate::web::tabs(), tab, "", body),
+        )
+    };
+    let small = if tab.is_empty() { title } else { "Server" };
     let html = format!(
-        "<header><h1>☀ <span>Sundial</span> <small class=muted>{}</small></h1></header>{body}{}",
-        esc(title),
+        "<header><h1>☀ <span>Sundial</span> <small class=muted>{}</small></h1>{out}</header>{main}{}",
+        esc(small),
         if body.contains("<div class=copy") || body.contains("<div class='copy") {
             COPY_SCRIPT
         } else {
@@ -441,8 +456,7 @@ async fn parents_page(State(s): State<Setup>, uri: Uri, headers: HeaderMap) -> R
              <label class=field>New password <input name=password type=password autocomplete=new-password minlength={MIN_PASSWORD} required></label>\
              <label class=field>New password again <input name=again type=password autocomplete=new-password minlength={MIN_PASSWORD} required></label>\
              <div class=row><button class=primary>Change</button></div></form></details>\
-             <p><a href=/two-factor>Two-factor sign-in: {}</a></p>\
-             <p><a href=/>Back</a></p></section>",
+             <p><a href=/two-factor>Two-factor sign-in: {}</a></p></section>",
             flash(&uri),
             esc(&me),
             esc(&names(&s).join(", ")),
@@ -770,9 +784,10 @@ async fn pair_page(State(s): State<Setup>, uri: Uri, headers: HeaderMap) -> Resp
     } else {
         ""
     };
+    let home = if setup { "/" } else { "/?tab=computers" };
     let again = |label: &str| {
         format!(
-            "<form method=post action=/pair class=row>{hidden}<button>{label}</button><a href=/>{}</a></form>",
+            "<form method=post action=/pair class=row>{hidden}<button>{label}</button><a href=\"{home}\">{}</a></form>",
             if setup { "Finish" } else { "Back" }
         )
     };
@@ -782,7 +797,7 @@ async fn pair_page(State(s): State<Setup>, uri: Uri, headers: HeaderMap) -> Resp
              <li>Run this command:</li></ol>{}\
              <p class=muted>Or just the pairing code:</p>{}\
              <p class='muted wait-line'><i></i>Waiting for the computer. The code works once, for 15 minutes.</p>\
-             <div class=row><a class=plain href=/>{}</a></div>\
+             <div class=row><a class=plain href=\"{home}\">{}</a></div>\
              <script>setInterval(async()=>{{try{{const r=await fetch('/pair/state');if(r.redirected||(await r.text())!=='waiting')location.reload()}}catch(e){{}}}},3000)</script>",
             copy_box(
                 &format!("sudo sundial pair {} {code}", reached(&headers, &uri)),
@@ -792,8 +807,8 @@ async fn pair_page(State(s): State<Setup>, uri: Uri, headers: HeaderMap) -> Resp
             if setup { "Do this later" } else { "Back" }
         ),
         PairState::Done(name) => format!(
-            "<h2>{} is connected</h2><p>It appears on the main page within a few seconds.</p>\
-             <div class=row><a class=button href=/>Done</a></div>{}",
+            "<h2>{} is connected</h2><p>It appears under Computers within a few seconds.</p>\
+             <div class=row><a class=button href=\"{home}\">Done</a></div>{}",
             esc(&name),
             again("Add another")
         ),

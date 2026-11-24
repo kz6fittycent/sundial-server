@@ -14,7 +14,7 @@ use std::sync::Arc;
 use sundial_core::proto::{AdminRequest, AdminResponse};
 use sundial_core::rules::fmt_when;
 use sundial_web::auth::Auth;
-use sundial_web::{App, Backend, Section, enc, esc, same_origin, signed_in};
+use sundial_web::{App, Backend, Section, Tab, enc, esc, same_origin, signed_in};
 
 struct Computers(Arc<Hub>);
 
@@ -81,7 +81,20 @@ impl Backend for Computers {
         "sudo sundial-server passwd NAME"
     }
 
-    fn extra(&self) -> String {
+    fn tabs(&self) -> Vec<Tab> {
+        tabs()
+    }
+
+    fn empty(&self) -> String {
+        "<h2>No children yet</h2><p>They appear here once a computer with Sundial is connected and manages an account. \
+         <a href=\"/?tab=computers\">Computers</a></p>"
+            .into()
+    }
+
+    fn tab(&self, id: &str) -> Option<String> {
+        if id != "computers" {
+            return None;
+        }
         let mut h = String::from(
             "<section class=card><h2>Computers</h2><form method=post action=/pair class=row>\
              <button class=primary>Add a computer</button></form>",
@@ -97,9 +110,24 @@ impl Backend for Computers {
                 state(&c, &now)
             ));
         }
-        h.push_str("</section><section class=card><h2>Parents</h2><p><a href=/parents>Logins and passwords</a></p></section>");
-        h
+        h.push_str("</section>");
+        Some(h)
     }
+}
+
+pub fn tabs() -> Vec<Tab> {
+    vec![
+        Tab {
+            id: "parents",
+            label: "Parents",
+            href: "/parents",
+        },
+        Tab {
+            id: "computers",
+            label: "Computers",
+            href: "/?tab=computers",
+        },
+    ]
 }
 
 #[derive(Clone)]
@@ -176,7 +204,7 @@ async fn remove(
             &format!(
                 "<section class=card><h2>Remove {}? <span class='pill {}'>{}</span></h2><p>{warn} Its limits stay in force.</p>\
                  <form method=post action=/remove class=row><input type=hidden name=id value=\"{}\"><input type=hidden name=confirm value=1>\
-                 <button class=danger>Remove</button><a class=plain href=/>Keep it</a></form></section>",
+                 <button class=danger>Remove</button><a class=plain href=\"/?tab=computers\">Keep it</a></form></section>",
                 esc(&c.name),
                 if c.online { "ok" } else { "wait" },
                 state(&c, &now),
@@ -189,5 +217,5 @@ async fn remove(
     } else {
         format!("err={}", enc("No such computer."))
     };
-    Redirect::to(&format!("/?{q}")).into_response()
+    Redirect::to(&format!("/?tab=computers&{q}")).into_response()
 }

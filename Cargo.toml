@@ -1,16 +1,16 @@
 [package]
 name = "sundial-server"
 description = "Parent web server for Sundial computers"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/kz6fittycent/sundial-server"
 
 [dependencies]
 # Pinned commit of Sundial's two-snaps branch; a release tag later.
-sundial-core = { git = "https://github.com/kz6fittycent/sundial", rev = "c34a6b610c0905e0c3059cd0608cf8c3ad831232" }
-sundial-web = { git = "https://github.com/kz6fittycent/sundial", rev = "c34a6b610c0905e0c3059cd0608cf8c3ad831232" }
-sundial-link = { git = "https://github.com/kz6fittycent/sundial", rev = "c34a6b610c0905e0c3059cd0608cf8c3ad831232" }
+sundial-core = { git = "https://github.com/kz6fittycent/sundial", rev = "b3a54bb1ad7f5a89cac98ddc4b96b1a2eff6d2b7" }
+sundial-web = { git = "https://github.com/kz6fittycent/sundial", rev = "b3a54bb1ad7f5a89cac98ddc4b96b1a2eff6d2b7" }
+sundial-link = { git = "https://github.com/kz6fittycent/sundial", rev = "b3a54bb1ad7f5a89cac98ddc4b96b1a2eff6d2b7" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }

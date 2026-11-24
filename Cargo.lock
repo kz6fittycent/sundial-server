@@ -1099,7 +1099,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sundial-core"
 version = "0.3.0"
-source = "git+https://github.com/kz6fittycent/sundial?rev=c34a6b610c0905e0c3059cd0608cf8c3ad831232#c34a6b610c0905e0c3059cd0608cf8c3ad831232"
+source = "git+https://github.com/kz6fittycent/sundial?rev=b3a54bb1ad7f5a89cac98ddc4b96b1a2eff6d2b7#b3a54bb1ad7f5a89cac98ddc4b96b1a2eff6d2b7"
 dependencies = [
  "chrono",
  "serde",
@@ -1111,7 +1111,7 @@ dependencies = [
 [[package]]
 name = "sundial-link"
 version = "0.3.0"
-source = "git+https://github.com/kz6fittycent/sundial?rev=c34a6b610c0905e0c3059cd0608cf8c3ad831232#c34a6b610c0905e0c3059cd0608cf8c3ad831232"
+source = "git+https://github.com/kz6fittycent/sundial?rev=b3a54bb1ad7f5a89cac98ddc4b96b1a2eff6d2b7#b3a54bb1ad7f5a89cac98ddc4b96b1a2eff6d2b7"
 dependencies = [
  "anyhow",
  "rand 0.8.8",
@@ -1124,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "sundial-server"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1146,7 +1146,7 @@ dependencies = [
 [[package]]
 name = "sundial-web"
 version = "0.3.0"
-source = "git+https://github.com/kz6fittycent/sundial?rev=c34a6b610c0905e0c3059cd0608cf8c3ad831232#c34a6b610c0905e0c3059cd0608cf8c3ad831232"
+source = "git+https://github.com/kz6fittycent/sundial?rev=b3a54bb1ad7f5a89cac98ddc4b96b1a2eff6d2b7#b3a54bb1ad7f5a89cac98ddc4b96b1a2eff6d2b7"
 dependencies = [
  "anyhow",
  "argon2",
