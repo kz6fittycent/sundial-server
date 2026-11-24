@@ -1,27 +1,53 @@
 name: sundial-server
 title: Sundial Server
-summary: Manage Sundial computers from anywhere
+summary: Manage Sundial screen time limits from anywhere
 description: |
-  The optional parent server for Sundial, which sets screen time limits on Linux
-  computers. The child's computer connects out to this server, so parents can see
-  time left and activity, give or take time, lock, and change hours from a web page,
-  wherever the child is.
+  The optional parent server for Sundial, which sets screen time limits on
+  Linux computers. The child's computer connects out to this server, so
+  parents can see time left and activity, give or take time, lock, and change
+  hours from a web page, wherever the child is. Limits keep working when the
+  server can't be reached.
 
-  After installing, set up the parents in a browser on your home network:
-  open https://<this computer>:8461/.
+  Free and open source: no price, no ads, no account with anyone. Several
+  computers and parents, and optional two-factor sign-in.
+
+  The child's computer needs Sundial, in a version that can be paired with
+  this server.
+
+  After installing, open this in a browser on your home network and set up
+  the parents:
+
+    https://<this computer>:8461/
+
+  The certificate is self-signed, so the browser warns about it the first
+  time.
+
+  If a parent forgets a password or loses their phone:
+
+    sudo sundial-server passwd NAME
+    sudo sundial-server two-factor-off NAME
+
 adopt-info: sundial-server
-license: GPL-3.0-or-later
-website: https://github.com/kz6fittycent/sundial-server
-source-code: https://github.com/kz6fittycent/sundial-server
-issues: https://github.com/kz6fittycent/sundial-server/issues
-contact: https://github.com/kz6fittycent/sundial-server/issues
-icon: snap/gui/sundial-server.svg
 base: core24
 grade: stable
 confinement: strict
+license: GPL-3.0-or-later
+icon: snap/gui/sundial-server.svg
+contact: https://github.com/kz6fittycent/sundial-server/issues
+issues: https://github.com/kz6fittycent/sundial-server/issues
+source-code: https://github.com/kz6fittycent/sundial-server
+website: https://github.com/kz6fittycent/sundial-server/wiki
+donation:
+  - https://ko-fi.com/kz6fittycent
+  - https://www.patreon.com/kz6fittycent
+
 platforms:
   amd64:
+    build-on: [amd64]
+    build-for: [amd64]
   arm64:
+    build-on: [arm64]
+    build-for: [arm64]
 
 apps:
   sundial-server:
