@@ -60,6 +60,8 @@ enum Cmd {
         #[arg(long, conflicts_with = "delete")]
         stdin: bool,
     },
+    /// Turn off two-factor sign-in for a parent who lost their phone.
+    TwoFactorOff { name: String },
     /// Show a one-time code for adding a computer.
     Pair,
     /// List computers and their accounts.
@@ -112,6 +114,12 @@ async fn real_main() -> Result<()> {
             delete,
             stdin,
         } => return passwd(&cli.dir.join("admins"), &name, delete, stdin),
+        Cmd::TwoFactorOff { name } => {
+            if !sundial_web::two_factor::clear(&cli.dir.join("admins"), &name)? {
+                bail!("two-factor is not on for {name}");
+            }
+            return Ok(());
+        }
         Cmd::Pair => Control::Pair,
         Cmd::Hosts => Control::Hosts,
         Cmd::Revoke { id } => Control::Revoke { id },
@@ -157,6 +165,7 @@ fn passwd(path: &Path, name: &str, delete: bool, stdin: bool) -> Result<()> {
         if admins.remove(name).is_none() {
             bail!("no login named {name}");
         }
+        sundial_web::two_factor::clear(path, name)?;
         return auth::write_admins(path, &admins).context("writing logins (run as root)");
     }
     let pw = if stdin {

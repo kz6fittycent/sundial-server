@@ -114,6 +114,7 @@ pub fn router(hub: Arc<Hub>, auth: Arc<Auth>, admins: PathBuf, der: Option<Vec<u
         der: Arc::new(der),
         admins: Arc::new(admins),
         lock: Arc::default(),
+        enrolling: Arc::default(),
     };
     sundial_web::router(app)
         .merge(extra)
