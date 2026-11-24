@@ -2,7 +2,7 @@
 
 The optional parent server for [Sundial](https://github.com/kz6fittycent/sundial), which sets screen time limits on Linux computers. The child's computer connects out to the server, so parents can see and change things wherever the child is. Limits keep working when the server can't be reached.
 
-> **Work in progress.** There is no snap or release yet. Two-factor sign-in, the setup wizard and Let's Encrypt certificates are planned; the server uses a self-signed certificate today. The matching version of Sundial isn't published yet either.
+> **Work in progress.** There is no snap or release yet. Two-factor sign-in, the setup wizard and Let's Encrypt certificates are planned; the server uses a self-signed certificate today. It needs Sundial's `two-snaps` branch, not a released version.
 
 ## Screenshots
 
@@ -25,9 +25,12 @@ Adding a computer:
 
 ## Build
 
-This needs the matching Sundial source beside this directory, which isn't published yet:
+This needs Sundial's `two-snaps` branch beside this directory:
 
 ```sh
+git clone -b two-snaps https://github.com/kz6fittycent/sundial
+git clone https://github.com/kz6fittycent/sundial-server
+cd sundial-server
 cargo build --release
 sudo target/release/sundial-server run
 sudo target/release/sundial-server passwd mom
