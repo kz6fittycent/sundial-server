@@ -1,0 +1,44 @@
+name: sundial-server
+title: Sundial Server
+summary: Manage Sundial computers from anywhere
+description: |
+  The optional parent server for Sundial, which sets screen time limits on Linux
+  computers. The child's computer connects out to this server, so parents can see
+  time left and activity, give or take time, lock, and change hours from a web page,
+  wherever the child is.
+
+  After installing, add a parent login with `sudo sundial-server passwd NAME` and
+  open https://<this computer>:8461/.
+adopt-info: sundial-server
+license: GPL-3.0-or-later
+website: https://github.com/kz6fittycent/sundial-server
+source-code: https://github.com/kz6fittycent/sundial-server
+issues: https://github.com/kz6fittycent/sundial-server/issues
+contact: https://github.com/kz6fittycent/sundial-server/issues
+icon: snap/gui/sundial-server.svg
+base: core24
+grade: devel
+confinement: strict
+platforms:
+  amd64:
+  arm64:
+
+apps:
+  sundial-server:
+    command: bin/sundial-server
+    plugs: [network, network-bind]
+  daemon:
+    command: bin/sundial-server run
+    daemon: simple
+    restart-condition: always
+    restart-delay: 5s
+    plugs: [network, network-bind]
+
+parts:
+  sundial-server:
+    plugin: rust
+    source: .
+    rust-channel: stable
+    override-pull: |
+      craftctl default
+      craftctl set version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"

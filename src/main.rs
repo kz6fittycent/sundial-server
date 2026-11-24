@@ -1,6 +1,7 @@
 //! Sundial Server: lets parents manage Sundial computers from anywhere. The computers
 //! connect to it; it never connects to them.
 
+mod config;
 mod hub;
 mod net;
 mod web;
@@ -45,8 +46,9 @@ fn default_dir() -> PathBuf {
 enum Cmd {
     /// Run the server.
     Run {
-        #[arg(long, default_value = "0.0.0.0:8461")]
-        listen: SocketAddr,
+        /// Overrides `listen` in server.toml.
+        #[arg(long)]
+        listen: Option<SocketAddr>,
     },
     /// Set (or delete) a parent login.
     Passwd {
@@ -184,9 +186,11 @@ async fn ask(sock: &Path, req: &Control) -> Result<Reply> {
     serde_json::from_str(&line).context("bad reply")
 }
 
-async fn run(dir: PathBuf, listen: SocketAddr) -> Result<()> {
+async fn run(dir: PathBuf, listen: Option<SocketAddr>) -> Result<()> {
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    let cfg = config::Config::load(&dir.join("server.toml"))?;
+    let listen = listen.unwrap_or(cfg.listen);
     let _ = rustls::crypto::ring::default_provider().install_default();
     let name = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
     let name = match name.trim() {
@@ -196,6 +200,8 @@ async fn run(dir: PathBuf, listen: SocketAddr) -> Result<()> {
     let files = sundial_link::tls::ensure_cert(&dir.join("tls"), name, Vec::new())?;
     let der = sundial_link::tls::cert_der(&files.cert).context("reading the certificate")?;
     let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(&files.cert, &files.key).await?;
+    // Behind a proxy, hosts see its public certificate, not ours.
+    let der = cfg.trusted_proxy.is_none().then_some(der);
     let hub = Arc::new(Hub::load(dir.join("hosts.json"))?);
     let sock = dir.join("control.sock");
     let _ = std::fs::remove_file(&sock);
@@ -206,7 +212,11 @@ async fn run(dir: PathBuf, listen: SocketAddr) -> Result<()> {
     let app = Router::new()
         .route("/link", get(net::link))
         .with_state(hub.clone())
-        .merge(web::router(hub.clone(), auth, der));
+        .merge(web::router(hub.clone(), auth, der))
+        .layer(axum::middleware::from_fn_with_state(
+            cfg.trusted_proxy,
+            config::real_ip,
+        ));
     println!("sundial-server: listening on {listen}");
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     tokio::select! {
@@ -218,7 +228,7 @@ async fn run(dir: PathBuf, listen: SocketAddr) -> Result<()> {
     Ok(())
 }
 
-async fn control(listener: UnixListener, hub: Arc<Hub>, der: Vec<u8>) {
+async fn control(listener: UnixListener, hub: Arc<Hub>, der: Option<Vec<u8>>) {
     loop {
         let Ok((s, _)) = listener.accept().await else {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -236,7 +246,7 @@ async fn control(listener: UnixListener, hub: Arc<Hub>, der: Vec<u8>) {
                 return;
             }
             let reply = match serde_json::from_str(&line) {
-                Ok(c) => handle(&hub, &der, c),
+                Ok(c) => handle(&hub, der.as_deref(), c),
                 Err(e) => Reply {
                     text: format!("bad request: {e}"),
                     ..Default::default()
@@ -249,13 +259,13 @@ async fn control(listener: UnixListener, hub: Arc<Hub>, der: Vec<u8>) {
     }
 }
 
-fn handle(hub: &Hub, der: &[u8], c: Control) -> Reply {
+fn handle(hub: &Hub, der: Option<&[u8]>, c: Control) -> Reply {
     let mut r = Reply {
         ok: true,
         ..Default::default()
     };
     match c {
-        Control::Pair => r.text = hub.new_code(Some(der), now()).to_string(),
+        Control::Pair => r.text = hub.new_code(der, now()).to_string(),
         Control::Hosts => r.hosts = hub.list(now()),
         Control::Revoke { id } => {
             r.ok = hub.revoke(&id);

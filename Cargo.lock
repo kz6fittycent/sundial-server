@@ -1084,6 +1084,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sundial-core"
 version = "0.3.0"
+source = "git+https://github.com/kz6fittycent/sundial?rev=95c09ec994f9e79ee635834a3c3254a5efca7be0#95c09ec994f9e79ee635834a3c3254a5efca7be0"
 dependencies = [
  "chrono",
  "serde",
@@ -1095,6 +1096,7 @@ dependencies = [
 [[package]]
 name = "sundial-link"
 version = "0.3.0"
+source = "git+https://github.com/kz6fittycent/sundial?rev=95c09ec994f9e79ee635834a3c3254a5efca7be0#95c09ec994f9e79ee635834a3c3254a5efca7be0"
 dependencies = [
  "anyhow",
  "rand 0.8.8",
@@ -1122,11 +1124,13 @@ dependencies = [
  "sundial-link",
  "sundial-web",
  "tokio",
+ "toml",
 ]
 
 [[package]]
 name = "sundial-web"
 version = "0.3.0"
+source = "git+https://github.com/kz6fittycent/sundial?rev=95c09ec994f9e79ee635834a3c3254a5efca7be0#95c09ec994f9e79ee635834a3c3254a5efca7be0"
 dependencies = [
  "anyhow",
  "argon2",

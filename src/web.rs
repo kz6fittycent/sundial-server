@@ -95,10 +95,10 @@ impl Backend for Computers {
 struct Extra {
     app: App,
     hub: Arc<Hub>,
-    der: Arc<Vec<u8>>,
+    der: Arc<Option<Vec<u8>>>,
 }
 
-pub fn router(hub: Arc<Hub>, auth: Arc<Auth>, der: Vec<u8>) -> Router {
+pub fn router(hub: Arc<Hub>, auth: Arc<Auth>, der: Option<Vec<u8>>) -> Router {
     let app = App {
         backend: Arc::new(Computers(hub.clone())),
         auth,
@@ -129,7 +129,7 @@ async fn pair(State(x): State<Extra>, uri: Uri, headers: HeaderMap) -> Response 
     if let Err(r) = guard(&x, &headers, &uri) {
         return r;
     }
-    let code = x.hub.new_code(Some(&x.der), Utc::now().timestamp());
+    let code = x.hub.new_code(x.der.as_deref(), Utc::now().timestamp());
     let body = format!(
         "<div class=card><h1>☀ <span>Add a computer</span></h1>\
          <p>On the child's computer, run this with your server's address:</p>\

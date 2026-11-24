@@ -7,16 +7,16 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/kz6fittycent/sundial-server"
 
 [dependencies]
-# Local checkout beside this one, until Sundial's protocol crates are published in its
-# repository; then a git dependency pinned to a tag.
-sundial-core = { path = "../sundial/crates/sundial-core" }
-sundial-web = { path = "../sundial/crates/sundial-web" }
-sundial-link = { path = "../sundial/crates/sundial-link" }
+# Pinned commit of Sundial's two-snaps branch; a release tag later.
+sundial-core = { git = "https://github.com/kz6fittycent/sundial", rev = "95c09ec994f9e79ee635834a3c3254a5efca7be0" }
+sundial-web = { git = "https://github.com/kz6fittycent/sundial", rev = "95c09ec994f9e79ee635834a3c3254a5efca7be0" }
+sundial-link = { git = "https://github.com/kz6fittycent/sundial", rev = "95c09ec994f9e79ee635834a3c3254a5efca7be0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 rpassword = "7"
+toml = "0.9"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "signal", "sync"] }
 axum = { version = "0.8", features = ["ws", "form"] }
