@@ -92,6 +92,9 @@ impl Backend for Computers {
     }
 
     fn tab(&self, id: &str) -> Option<String> {
+        if id == "location" {
+            return Some(self.location());
+        }
         if id != "computers" {
             return None;
         }
@@ -115,8 +118,109 @@ impl Backend for Computers {
     }
 }
 
+impl Computers {
+    fn location(&self) -> String {
+        let now = Local::now();
+        let mut h = String::new();
+        for c in self.0.list(now.timestamp()) {
+            h.push_str(&location_card(&c, &now));
+        }
+        if h.is_empty() {
+            h.push_str(
+                "<section class=card><h2>Location</h2><p>Add a computer first.</p></section>",
+            );
+        }
+        h
+    }
+}
+
+fn location_card(c: &HostSummary, now: &DateTime<Local>) -> String {
+    let head = format!(
+        "<section class=card><h2>{} <span class='pill {}'>{}</span></h2>",
+        esc(&c.name),
+        if c.online { "ok" } else { "wait" },
+        state(c, now)
+    );
+    let Some(l) = c.status.as_ref().and_then(|s| s.location.as_ref()) else {
+        return format!(
+            "{head}<p class=muted>Sundial on this computer needs an update before it can show its location.</p></section>"
+        );
+    };
+    let button = |on: &str, class: &str, text: &str| {
+        format!(
+            "<form method=post action=/location class=row><input type=hidden name=id value=\"{}\">\
+             <input type=hidden name=on value={on}><button{class}>{text}</button></form>",
+            esc(&c.id)
+        )
+    };
+    if !l.on {
+        return format!(
+            "{head}<p>Location is off.</p><p class=muted>When it's on, this computer looks up its position every few minutes using \
+             the networks around it, and the child sees a notice that it's on. Only the latest position is kept.</p>{}</section>",
+            button("1", " class=primary", "Turn on location")
+        );
+    }
+    let place = match l.fix.filter(|f| f.valid()) {
+        Some(f) => format!(
+            "<p class=big>Within about {} of {:.4}, {:.4}</p>{}\
+             <p class=muted>As of {}.{}</p>\
+             <div class=row><a class=plain href=\"https://www.openstreetmap.org/?mlat={:.5}&amp;mlon={:.5}#map={}/{:.5}/{:.5}\" target=_blank rel=noreferrer>Show on a map</a></div>",
+            distance(f.accuracy_m),
+            f.lat,
+            f.lon,
+            if f.accuracy_m > ROUGH_METERS {
+                "<p class='flash err'>This is only a rough area. It's often the internet provider's location, not the computer's.</p>"
+            } else {
+                ""
+            },
+            fmt_when(f.at, now),
+            if c.online {
+                ""
+            } else {
+                " It's offline now, so it may have moved."
+            },
+            f.lat,
+            f.lon,
+            if f.accuracy_m > ROUGH_METERS { 10 } else { 16 },
+            f.lat,
+            f.lon
+        ),
+        None if l.problem.is_some() => String::new(),
+        None => "<p>Looking. The first position can take a minute.</p>".into(),
+    };
+    let problem = l
+        .problem
+        .as_ref()
+        .map(|p| {
+            format!(
+                "<p class='flash err'>The last try didn't work: {}</p>",
+                esc(p)
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "{head}{place}{problem}{}</section>",
+        button("0", "", "Turn off location")
+    )
+}
+
+const ROUGH_METERS: f64 = 3000.0;
+
+fn distance(m: f64) -> String {
+    if m < 1000.0 {
+        format!("{} m", ((m / 10.0).ceil() * 10.0).max(10.0))
+    } else {
+        format!("{} km", (m / 1000.0).round())
+    }
+}
+
 pub fn tabs() -> Vec<Tab> {
     vec![
+        Tab {
+            id: "location",
+            label: "Location",
+            href: "/?tab=location",
+        },
         Tab {
             id: "parents",
             label: "Parents",
@@ -143,6 +247,7 @@ pub fn router(hub: Arc<Hub>, auth: Arc<Auth>, admins: PathBuf, der: Option<Vec<u
     };
     let extra = Router::new()
         .route("/remove", post(remove))
+        .route("/location", post(location))
         .with_state(Extra {
             app: app.clone(),
             hub: hub.clone(),
@@ -162,12 +267,12 @@ pub fn router(hub: Arc<Hub>, auth: Arc<Auth>, admins: PathBuf, der: Option<Vec<u
 }
 
 #[allow(clippy::result_large_err)]
-fn guard(x: &Extra, headers: &HeaderMap, uri: &Uri) -> Result<(), Response> {
+fn guard(x: &Extra, headers: &HeaderMap, uri: &Uri) -> Result<String, Response> {
     if !same_origin(headers, uri) {
         return Err(StatusCode::FORBIDDEN.into_response());
     }
     match signed_in(&x.app, headers) {
-        Some(_) => Ok(()),
+        Some(p) => Ok(p),
         None => Err(Redirect::to("/").into_response()),
     }
 }
@@ -176,6 +281,45 @@ fn guard(x: &Extra, headers: &HeaderMap, uri: &Uri) -> Result<(), Response> {
 struct RemoveForm {
     id: String,
     confirm: Option<String>,
+}
+
+async fn location(
+    State(x): State<Extra>,
+    uri: Uri,
+    headers: HeaderMap,
+    Form(f): Form<LocationForm>,
+) -> Response {
+    let by = match guard(&x, &headers, &uri) {
+        Ok(by) => by,
+        Err(r) => return r,
+    };
+    let now = Utc::now().timestamp();
+    // Hosts that don't know the request would drop the connection over it.
+    let known = x
+        .hub
+        .list(now)
+        .into_iter()
+        .find(|c| c.id == f.id)
+        .is_some_and(|c| c.status.is_some_and(|s| s.location.is_some()));
+    let r = if known {
+        let on = f.on == "1";
+        x.hub
+            .enqueue(&f.id, AdminRequest::SetLocation { by, on }, now)
+    } else {
+        Err("This computer can't show its location.".into())
+    };
+    let q = match r {
+        Ok(true) => format!("msg={}", enc("Sent. It takes a few seconds.")),
+        Ok(false) => format!("msg={}", enc("Waiting; this computer is offline.")),
+        Err(e) => format!("err={}", enc(&e)),
+    };
+    Redirect::to(&format!("/?tab=location&{q}")).into_response()
+}
+
+#[derive(Deserialize)]
+struct LocationForm {
+    id: String,
+    on: String,
 }
 
 async fn remove(
