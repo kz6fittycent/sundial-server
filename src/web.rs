@@ -11,7 +11,8 @@ use chrono::{DateTime, Local, Utc};
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use sundial_core::proto::{AdminRequest, AdminResponse};
+use sundial_core::places::{MAX_NAME, check_name};
+use sundial_core::proto::{AdminRequest, AdminResponse, Location};
 use sundial_core::rules::fmt_when;
 use sundial_web::auth::Auth;
 use sundial_web::{App, Backend, Section, Tab, enc, esc, same_origin, signed_in};
@@ -160,9 +161,9 @@ fn location_card(c: &HostSummary, now: &DateTime<Local>) -> String {
             button("1", " class=primary", "Turn on location")
         );
     }
-    let place = match l.fix.filter(|f| f.valid()) {
+    let fix = match l.fix.filter(|f| f.valid()) {
         Some(f) => format!(
-            "<p class=big>Within about {} of {:.4}, {:.4}</p>{}\
+            "<p>Within about {} of {:.4}, {:.4}</p>{}\
              <p class=muted>As of {}.{}</p>\
              <div class=row><a class=plain href=\"https://www.openstreetmap.org/?mlat={:.5}&amp;mlon={:.5}#map={}/{:.5}/{:.5}\" target=_blank rel=noreferrer>Show on a map</a></div>",
             distance(f.accuracy_m),
@@ -186,7 +187,7 @@ fn location_card(c: &HostSummary, now: &DateTime<Local>) -> String {
             f.lon
         ),
         None if l.problem.is_some() => String::new(),
-        None => "<p>Looking. The first position can take a minute.</p>".into(),
+        None => "<p>Looking for a position. The first position can take a minute.</p>".into(),
     };
     let problem = l
         .problem
@@ -198,12 +199,71 @@ fn location_card(c: &HostSummary, now: &DateTime<Local>) -> String {
             )
         })
         .unwrap_or_default();
+    // A refused mark (no Wi-Fi in range, say) comes back as the computer's last result.
+    let refused = c
+        .results
+        .last()
+        .filter(|r| !r.ok && now.timestamp() - r.ts < STALE_SECS)
+        .map(|r| format!("<p class='flash err'>{}</p>", esc(&r.message)))
+        .unwrap_or_default();
     format!(
-        "{head}{place}{problem}{}</section>",
+        "{head}{refused}{}{fix}{problem}{}{}</section>",
+        at_place(l, c, now),
+        places_form(l, c),
         button("0", "", "Turn off location")
     )
 }
 
+/// "At Home", or that it's somewhere else.
+fn at_place(l: &Location, c: &HostSummary, now: &DateTime<Local>) -> String {
+    let (Some(names), Some(at)) = (&l.places, l.looked) else {
+        return String::new();
+    };
+    if names.is_empty() {
+        return String::new();
+    }
+    let was = !c.online || now.timestamp() - at > STALE_SECS;
+    let text = match (&l.place, was) {
+        (Some(p), false) => format!("At {}", esc(p)),
+        (Some(p), true) => format!("Last seen at {}", esc(p)),
+        (None, false) => "Not at a place you've marked".into(),
+        (None, true) => "Last seen away from the places you've marked".into(),
+    };
+    format!(
+        "<p class=big><b>{text}</b> <span class=muted>as of {}</span></p>",
+        fmt_when(at, now)
+    )
+}
+
+fn places_form(l: &Location, c: &HostSummary) -> String {
+    let Some(names) = &l.places else {
+        return "<p class=muted>Update Sundial on this computer to mark places such as Home.</p>"
+            .into();
+    };
+    let id = esc(&c.id);
+    let mut h = String::from("<h3>Places</h3>");
+    if c.online {
+        h.push_str(&format!(
+            "<form method=post action=/place class=row><input type=hidden name=id value=\"{id}\">\
+             <label for=place-{id}>The computer is now at</label>\
+             <input id=place-{id} name=name maxlength={MAX_NAME} placeholder=Home autocomplete=off required>\
+             <button class=primary>Mark this place</button></form>\
+             <p class=muted>Sundial recognizes it later by the Wi-Fi networks around it. Mark a big place again from another room to help.</p>"
+        ));
+    } else {
+        h.push_str("<p class=muted>A place can be marked when this computer is online.</p>");
+    }
+    for n in names {
+        h.push_str(&format!(
+            "<form method=post action=/place/remove class=row><input type=hidden name=id value=\"{id}\">\
+             <input type=hidden name=name value=\"{0}\"><b>{0}</b><button>Remove</button></form>",
+            esc(n)
+        ));
+    }
+    h
+}
+
+const STALE_SECS: i64 = 300;
 const ROUGH_METERS: f64 = 3000.0;
 
 fn distance(m: f64) -> String {
@@ -248,6 +308,8 @@ pub fn router(hub: Arc<Hub>, auth: Arc<Auth>, admins: PathBuf, der: Option<Vec<u
     let extra = Router::new()
         .route("/remove", post(remove))
         .route("/location", post(location))
+        .route("/place", post(add_place))
+        .route("/place/remove", post(remove_place))
         .with_state(Extra {
             app: app.clone(),
             hub: hub.clone(),
@@ -307,6 +369,66 @@ async fn location(
             .enqueue(&f.id, AdminRequest::SetLocation { by, on }, now)
     } else {
         Err("This computer can't show its location.".into())
+    };
+    let q = match r {
+        Ok(true) => format!("msg={}", enc("Sent. It takes a few seconds.")),
+        Ok(false) => format!("msg={}", enc("Waiting; this computer is offline.")),
+        Err(e) => format!("err={}", enc(&e)),
+    };
+    Redirect::to(&format!("/?tab=location&{q}")).into_response()
+}
+
+#[derive(Deserialize)]
+struct PlaceForm {
+    id: String,
+    name: String,
+}
+
+async fn add_place(
+    State(x): State<Extra>,
+    uri: Uri,
+    headers: HeaderMap,
+    Form(f): Form<PlaceForm>,
+) -> Response {
+    place(&x, &headers, &uri, &f, true)
+}
+
+async fn remove_place(
+    State(x): State<Extra>,
+    uri: Uri,
+    headers: HeaderMap,
+    Form(f): Form<PlaceForm>,
+) -> Response {
+    place(&x, &headers, &uri, &f, false)
+}
+
+fn place(x: &Extra, headers: &HeaderMap, uri: &Uri, f: &PlaceForm, add: bool) -> Response {
+    let by = match guard(x, headers, uri) {
+        Ok(by) => by,
+        Err(r) => return r,
+    };
+    let now = Utc::now().timestamp();
+    let host = x.hub.list(now).into_iter().find(|c| c.id == f.id);
+    // Hosts that don't know the request would drop the connection over it.
+    let able = host.as_ref().is_some_and(|c| {
+        c.status
+            .as_ref()
+            .and_then(|s| s.location.as_ref())
+            .is_some_and(|l| l.places.is_some())
+    });
+    let r = if !able {
+        Err("This computer can't mark places.".into())
+    } else if add && !host.is_some_and(|c| c.online) {
+        Err("This computer is offline, so it can't tell where it is.".into())
+    } else if add {
+        check_name(&f.name).and_then(|name| {
+            x.hub
+                .enqueue(&f.id, AdminRequest::AddPlace { by, name }, now)
+        })
+    } else {
+        let name = f.name.clone();
+        x.hub
+            .enqueue(&f.id, AdminRequest::RemovePlace { by, name }, now)
     };
     let q = match r {
         Ok(true) => format!("msg={}", enc("Sent. It takes a few seconds.")),

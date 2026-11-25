@@ -19,7 +19,7 @@ Setup, and adding a computer:
 ## How it works
 
 - One server can manage several computers; choose a child at the top of the page. Each shows the same information and controls as Sundial's own page, activity included.
-- Optional location: see where a computer is, off until a parent turns it on. The child sees that it's on.
+- Optional location: see where a computer is and mark places such as Home, off until a parent turns it on. The child sees that it's on.
 - Only the server needs to be reachable. Nothing is opened on the child's computer or network.
 - A change made while a computer is offline waits for it. Extra time expires after 30 minutes, so it can't turn up the next day.
 - The pairing code works once, for 15 minutes. With a self-signed certificate it also lets the computer recognize the server.
